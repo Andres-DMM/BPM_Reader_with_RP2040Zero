@@ -40,22 +40,22 @@ Ensure the following libraries are installed via the **Arduino Library Manager**
 
 ## 🔄 Execution Workflow
 
-[ IDLE STATE ]
-└─► Waiting for finger placement (IR > 20,000 threshold)
-│
-▼
-[ 20s MEASUREMENT ]
-├─► NeoPixel LED red breathing animation
-├─► Non-blocking warning on movement ("Keep Finger Still!")
-└─► Live BPM sampling & running sum calculation
-│
-▼
-[ 10s RESULT HOLD ]
-└─► Displays calculated 20s Average BPM
-│
-▼
-[ FINGER REMOVAL ]
-└─► Prompts user to remove finger to reset back to IDLE
+# [ IDLE STATE ]
+# └─► Waiting for finger placement (IR > 20,000 threshold)
+# │
+# ▼
+# [ 20s MEASUREMENT ]
+# ├─► NeoPixel LED red breathing animation
+# ├─► Non-blocking warning on movement ("Keep Finger Still!")
+# └─► Live BPM sampling & running sum calculation
+# │
+# ▼
+# [ 10s RESULT HOLD ]
+# └─► Displays calculated 20s Average BPM
+# │
+# ▼
+# [ FINGER REMOVAL ]
+# └─► Prompts user to remove finger to reset back to IDLE
 
 
 ---
