@@ -39,3 +39,34 @@ Ensure the following libraries are installed via the **Arduino Library Manager**
 ---
 
 ## 🔄 Execution Workflow
+
+[ IDLE STATE ]
+└─► Waiting for finger placement (IR > 20,000 threshold)
+│
+▼
+[ 20s MEASUREMENT ]
+├─► NeoPixel LED red breathing animation
+├─► Non-blocking warning on movement ("Keep Finger Still!")
+└─► Live BPM sampling & running sum calculation
+│
+▼
+[ 10s RESULT HOLD ]
+└─► Displays calculated 20s Average BPM
+│
+▼
+[ FINGER REMOVAL ]
+└─► Prompts user to remove finger to reset back to IDLE
+
+
+---
+
+## 💡 Sensor Usage Tips
+
+- **Light Contact:** Rest your finger lightly on the sensor glass. Pressing too hard flattens blood vessels and disrupts the IR readings.
+- **Shield Ambient Light:** Ensure your finger completely covers both the optical emitter and receiver. Excessive room lighting can alter sensor noise levels.
+
+---
+
+## 📄 License
+
+Distributed under the **MIT License**. Feel free to modify and build upon it!
