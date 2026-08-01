@@ -3,7 +3,6 @@
 #include <Adafruit_SSD1306.h>
 #include <Adafruit_NeoPixel.h>
 #include "MAX30105.h"
-#include "heartRate.h"
 
 // RP2040 Zero Onboard NeoPixel Configuration
 #define NEOPIXEL_PIN  16
@@ -20,16 +19,23 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 MAX30105 particleSensor;
 
 // Constants & Timing
-const unsigned long READ_DURATION_MS   = 20000; // 20 Seconds reading window
-const unsigned long RESULT_HOLD_MS    = 10000; // 10 Seconds display hold window
-const long FINGER_THRESHOLD           = 20000; // IR threshold for finger detection
+const unsigned long READ_DURATION_MS = 20000; // 20 Seconds reading window
+const unsigned long RESULT_HOLD_MS   = 10000; // 10 Seconds display hold window
+const long FINGER_THRESHOLD          = 20000; // IR threshold for finger detection
+
+// Fast Peak Detection Variables
+long irMin = 0;
+long irMax = 0;
+long lastBeatTime = 0;
+bool lookingForPeak = true;
 
 // Helper Declarations
 void showIdleScreen();
 void showLiveReading(int currentBpm, int secondsLeft);
-void showAverageResult(int avgBpm);
+void showAverageResult(int avgBpm, int holdSecondsLeft);
 void updateNeoPixelFade();
 void setLedColor(uint8_t r, uint8_t g, uint8_t b);
+bool detectBeatFast(long irValue);
 
 void setup() {
   Serial.begin(115200);
@@ -64,11 +70,11 @@ void setup() {
     while (1);
   }
 
-  // MAX30102 Setup
-  byte ledBrightness = 0x1F;
-  byte sampleAverage = 4;
-  byte ledMode       = 2;
-  int sampleRate     = 400;
+  // ULTRA-FAST SENSOR SETTINGS
+  byte ledBrightness = 0x24; // ~7.2mA power
+  byte sampleAverage = 1;    // No sample averaging
+  byte ledMode       = 2;    // Red + IR
+  int sampleRate     = 200;  // 200 Hz gives stable pulse curves
   int pulseWidth     = 411;
   int adcRange       = 4096;
 
@@ -87,57 +93,60 @@ void loop() {
   
   if (irValue > FINGER_THRESHOLD) {
     // -------------------------------------------------------------
-    // STAGE 2: 20-SECOND MEASUREMENT
+    // STAGE 2: INSTANT CALIBRATION RESET
+    // -------------------------------------------------------------
+    particleSensor.clearFIFO();
+    irMin = irValue;
+    irMax = irValue;
+    lastBeatTime = millis();
+    lookingForPeak = true;
+
+    // -------------------------------------------------------------
+    // STAGE 3: 20-SECOND MEASUREMENT
     // -------------------------------------------------------------
     unsigned long startTime = millis();
+    unsigned long lastDisplayUpdate = 0;
+    
     long bpmSum = 0;
     int validSamples = 0;
-    long lastBeat = 0;
-    unsigned long warnStartTime = 0;
-    bool displayingWarning = false;
+    int latestBpm = 0;
 
     while (millis() - startTime < READ_DURATION_MS) {
-      updateNeoPixelFade(); // Red fading LED during scanning
+      // 1. PROCESS ALL WAITING SAMPLES FROM SENSOR FIFO FAST
+      particleSensor.check(); // Check sensor buffer
+      
+      while (particleSensor.available()) {
+        long currentIR = particleSensor.getFIFOIR();
+        particleSensor.nextSample(); // Advance to next sample in FIFO
 
-      long currentIR = particleSensor.getIR();
-
-      // Finger slipped off
-      if (currentIR < FINGER_THRESHOLD) {
-        if (!displayingWarning) {
-          warnStartTime = millis();
-          displayingWarning = true;
-          
-          display.clearDisplay();
-          display.setTextSize(1);
-          display.setCursor(8, 28);
-          display.println(F("Keep Finger Still!"));
-          display.display();
+        // Check if finger slipped off
+        if (currentIR < FINGER_THRESHOLD) {
+          continue;
         }
 
-        if (displayingWarning && (millis() - warnStartTime >= 1000)) {
-          displayingWarning = false;
+        // Check for pulse peak
+        if (detectBeatFast(currentIR)) {
+          long delta = millis() - lastBeatTime;
+          lastBeatTime = millis();
+
+          float beatsPerMinute = 60000.0 / delta;
+
+          // Realistic BPM filter
+          if (beatsPerMinute >= 45.0 && beatsPerMinute <= 180.0) {
+            bpmSum += beatsPerMinute;
+            validSamples++;
+            latestBpm = (int)beatsPerMinute;
+          }
         }
-        
-        delay(10);
-        continue;
       }
 
-      displayingWarning = false;
-
-      // Check for pulse beat
-      if (checkForBeat(currentIR) == true) {
-        long delta = millis() - lastBeat;
-        lastBeat = millis();
-
-        float beatsPerMinute = 60.0 / (delta / 1000.0);
-
-        if (beatsPerMinute >= 45.0 && beatsPerMinute <= 170.0) {
-          bpmSum += beatsPerMinute;
-          validSamples++;
-
-          int secondsLeft = (READ_DURATION_MS - (millis() - startTime)) / 1000;
-          showLiveReading((int)beatsPerMinute, secondsLeft);
-        }
+      // 2. UPDATE DISPLAY ONLY EVERY 250ms (PREVENTS SENSOR STARVATION)
+      if (millis() - lastDisplayUpdate >= 250) {
+        lastDisplayUpdate = millis();
+        updateNeoPixelFade();
+        
+        int secondsLeft = (READ_DURATION_MS - (millis() - startTime)) / 1000;
+        showLiveReading(latestBpm, secondsLeft);
       }
     }
 
@@ -145,7 +154,7 @@ void loop() {
     setLedColor(0, 0, 0);
 
     // -------------------------------------------------------------
-    // STAGE 3: SHOW AVERAGE RESULT FOR 10 SECONDS
+    // STAGE 4: SHOW AVERAGE RESULT FOR 10 SECONDS
     // -------------------------------------------------------------
     if (validSamples > 0) {
       int finalBpmAvg = bpmSum / validSamples;
@@ -168,7 +177,7 @@ void loop() {
     }
 
     // -------------------------------------------------------------
-    // STAGE 4: REQUIRE FINGER REMOVAL BEFORE RESETTING
+    // STAGE 5: REQUIRE FINGER REMOVAL BEFORE RESETTING
     // -------------------------------------------------------------
     while (particleSensor.getIR() > FINGER_THRESHOLD) {
       display.clearDisplay();
@@ -186,13 +195,43 @@ void loop() {
 }
 
 // -------------------------------------------------------------
+// DYNAMIC PEAK DETECTOR
+// -------------------------------------------------------------
+bool detectBeatFast(long irValue) {
+  // Smoothly adjust min/max tracking bounds
+  irMin = (irMin * 0.98) + (irValue * 0.02);
+  irMax = (irMax * 0.98) + (irValue * 0.02);
+
+  if (irValue < irMin) irMin = irValue;
+  if (irValue > irMax) irMax = irValue;
+
+  long threshold = irMin + ((irMax - irMin) * 0.55); // Dynamic peak threshold (55%)
+
+  // Refractory period: Minimum 330ms between beats (~180 BPM max limit)
+  if (millis() - lastBeatTime < 330) {
+    return false;
+  }
+
+  if (lookingForPeak && irValue > threshold) {
+    lookingForPeak = false; // Beat peak found!
+    return true;
+  }
+
+  if (!lookingForPeak && irValue < (irMin + ((irMax - irMin) * 0.35))) {
+    lookingForPeak = true; // Valley found, ready for next beat
+  }
+
+  return false;
+}
+
+// -------------------------------------------------------------
 // NEOPIXEL HELPER FUNCTIONS
 // -------------------------------------------------------------
 
 void updateNeoPixelFade() {
   static unsigned long lastUpdate = 0;
   static int brightness = 0;
-  static int fadeAmount = 5;
+  static int fadeAmount = 15;
 
   if (millis() - lastUpdate > 15) {
     lastUpdate = millis();
@@ -237,7 +276,12 @@ void showLiveReading(int currentBpm, int secondsLeft) {
 
   display.setCursor(0, 32);
   display.print(F("Current BPM: "));
-  display.println(currentBpm);
+  
+  if (currentBpm > 0) {
+    display.println(currentBpm);
+  } else {
+    display.println(F("--"));
+  }
   
   display.display();
 }
