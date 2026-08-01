@@ -22,7 +22,7 @@ Featuring a smart finger-detection workflow, real-time beat calculations, 20-sec
 | Component | Interface / Pin | Default Bus | Address |
 | :--- | :--- | :--- | :--- |
 | **SSD1306 OLED (128x64)** | SDA: `GP4` / SCL: `GP5` | `Wire` (`I2C0`) | `0x3C` |
-| **MAX30102 Sensor** | SDA: `GP2` / SCL: `GP3` | `Wire1` (`I2C1`) | `0x57` |
+| **MAX30102 Sensor** | SDA: `GP26` / SCL: `GP27` | `Wire1` (`I2C1`) | `0x57` |
 | **Status NeoPixel** | Data: `GP16` | Onboard RGB | — |
 
 ---
